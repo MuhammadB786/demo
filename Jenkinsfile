@@ -19,6 +19,7 @@ pipeline {
     stage('Build (Jar)') {
       steps {
         sh '''
+          set -eux
           mvn -B -DskipTests clean package
           ls -lh target
         '''
@@ -28,13 +29,23 @@ pipeline {
     stage('Determine Maven Coordinates') {
       steps {
         sh '''
-          GID=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.groupId}' --non-recursive org.codehaus.mojo:exec-maven-plugin:3.1.0:exec)
+          set -eux
+          GID=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.groupId}'    --non-recursive org.codehaus.mojo:exec-maven-plugin:3.1.0:exec)
           AID=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.artifactId}' --non-recursive org.codehaus.mojo:exec-maven-plugin:3.1.0:exec)
-          VER=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}'   --non-recursive org.codehaus.mojo:exec-maven-plugin:3.1.0:exec)
-          echo "GAV: $GID:$AID:$VER" > gav.txt
-          printf "GID=%s\nAID=%s\nVER=%s\n" "$GID" "$AID" "$VER" > coords.env
+          VER=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}'    --non-recursive org.codehaus.mojo:exec-maven-plugin:3.1.0:exec)
+          echo "Resolved GAV: $GID:$AID:$VER" | tee gav.txt
+
+          cat > coords.env <<EOT
+GID=$GID
+AID=$AID
+VER=$VER
+EOT
+
+          echo "--- coords.env contents ---"
+          cat coords.env
+          echo "---------------------------"
+          ls -l coords.env
         '''
-        script { echo "Resolved " + readFile('gav.txt').trim() }
       }
     }
 
@@ -42,9 +53,15 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'NEXUS_CRED', usernameVariable: 'NUSER', passwordVariable: 'NPASS')]) {
           sh '''
-            . coords.env
+            set -eux
+            pwd
+            ls -la
+            test -f ./coords.env
+            . ./coords.env
+
             FILE=$(ls target/*.jar | head -n1)
             echo "Uploading $FILE to $NEXUS_URL repository $NEXUS_REPO as $GID:$AID:$VER"
+
             curl -f -u "$NUSER:$NPASS" \
               -H "accept: application/json" \
               -H "Content-Type: multipart/form-data" \
