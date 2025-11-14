@@ -2,7 +2,7 @@ pipeline {
   agent any
   options { timestamps(); buildDiscarder(logRotator(numToKeepStr: '15')) }
   triggers { pollSCM('H/5 * * * *') }
-  tools { maven 'Maven 3'; jdk 'JDK 17' }
+  tools { maven 'Maven 3.8.x+'; jdk 'JDK 17' }
   stages {
     stage('Checkout') { steps { checkout scm } }
     stage('Build (Fat JAR)') {
