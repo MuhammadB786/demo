@@ -7,8 +7,8 @@ pipeline {
   }
 
   environment {
-    NEXUS_URL = 'http://nexus:8081'
-    NEXUS_REPO = 'maven-snapshots'
+    // Use snapshots if your version ends with -SNAPSHOT; use releases for non-SNAPSHOT versions.
+    NEXUS_REPO_URL = 'http://nexus:8081/repository/maven-snapshots'
   }
 
   stages {
@@ -16,62 +16,44 @@ pipeline {
       steps { checkout scm }
     }
 
-    stage('Build (Jar)') {
+    stage('Build + Deploy to Nexus (Maven)') {
       steps {
-        sh '''
-          set -eux
-          mvn -B -DskipTests clean package
-          ls -lh target
-        '''
-      }
-    }
-
-    stage('Determine Maven Coordinates') {
-      steps {
-        sh '''
-          set -eux
-          GID=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.groupId}'    --non-recursive org.codehaus.mojo:exec-maven-plugin:3.1.0:exec)
-          AID=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.artifactId}' --non-recursive org.codehaus.mojo:exec-maven-plugin:3.1.0:exec)
-          VER=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}'    --non-recursive org.codehaus.mojo:exec-maven-plugin:3.1.0:exec)
-          echo "Resolved GAV: $GID:$AID:$VER" | tee gav.txt
-
-          cat > coords.env <<EOT
-GID=$GID
-AID=$AID
-VER=$VER
-EOT
-
-          echo "--- coords.env contents ---"
-          cat coords.env
-          echo "---------------------------"
-          ls -l coords.env
-        '''
-      }
-    }
-
-    stage('Upload to Nexus') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'NEXUS_CRED', usernameVariable: 'NUSER', passwordVariable: 'NPASS')]) {
+        withCredentials([usernamePassword(
+          credentialsId: 'NEXUS_CRED',
+          usernameVariable: 'NUSER',
+          passwordVariable: 'NPASS'
+        )]) {
           sh '''
             set -eux
-            pwd
-            ls -la
-            test -f ./coords.env
-            . ./coords.env
 
-            FILE=$(ls target/*.jar | head -n1)
-            echo "Uploading $FILE to $NEXUS_URL repository $NEXUS_REPO as $GID:$AID:$VER"
+            # Build (skip tests to be fast)
+            mvn -B -DskipTests clean package
 
-            curl -f -u "$NUSER:$NPASS" \
-              -H "accept: application/json" \
-              -H "Content-Type: multipart/form-data" \
-              -F "maven2.groupId=$GID" \
-              -F "maven2.artifactId=$AID" \
-              -F "maven2.version=$VER" \
-              -F "maven2.generate-pom=true" \
-              -F "maven2.asset1=@${FILE}" \
-              -F "maven2.asset1.extension=jar" \
-              "$NEXUS_URL/service/rest/v1/components?repository=$NEXUS_REPO"
+            # Create a minimal Maven settings.xml that contains Nexus credentials
+            cat > settings.xml <<EOT
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+          https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <servers>
+    <server>
+      <id>nexus</id>
+      <username>${NUSER}</username>
+      <password>${NPASS}</password>
+    </server>
+  </servers>
+</settings>
+EOT
+
+            # Deploy without modifying pom.xml:
+            # -s settings.xml  -> use the creds above
+            # -DaltDeploymentRepository -> point at your Nexus repo (snapshots or releases)
+            mvn -B -DskipTests deploy \
+              -s settings.xml \
+              -DaltDeploymentRepository=nexus::default::${NEXUS_REPO_URL}
+
+            # Show what we built
+            ls -lh target || true
           '''
         }
       }
@@ -81,7 +63,7 @@ EOT
   post {
     success {
       archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-      echo 'Build + Upload OK'
+      echo 'Build + Deploy OK'
     }
     failure {
       echo 'Pipeline failed'
