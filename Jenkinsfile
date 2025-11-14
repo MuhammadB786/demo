@@ -8,7 +8,7 @@ pipeline {
 
   environment {
     NEXUS_URL = 'http://nexus:8081'
-    NEXUS_REPO = 'maven-releases'
+    NEXUS_REPO = 'maven-snapshots'
   }
 
   stages {
