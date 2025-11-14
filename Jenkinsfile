@@ -42,7 +42,7 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'NEXUS_CRED', usernameVariable: 'NUSER', passwordVariable: 'NPASS')]) {
           sh '''
-            source coords.env
+            . coords.env
             FILE=$(ls target/*.jar | head -n1)
             echo "Uploading $FILE to $NEXUS_URL repository $NEXUS_REPO as $GID:$AID:$VER"
             curl -f -u "$NUSER:$NPASS" \
